@@ -9,20 +9,36 @@ import publicRoutes from './app/modules/public/public.routes.js';
 const app = express();
 
 // Middleware - CORS must be first!
-// CORS configuration - Allow all origins in development
+// CORS configuration
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://nexa-tech-client.vercel.app',
+  'https://www.nexa-tech-client.vercel.app',
+  process.env.CLIENT_URL,
+].filter(Boolean);
+
 app.use(cors({
   origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, Postman, etc.) in development
+    if (!origin && process.env.NODE_ENV === 'development') {
+      callback(null, true);
+      return;
+    }
+    
     // Allow all origins in development
-    if (!origin || process.env.NODE_ENV === 'development') {
+    if (process.env.NODE_ENV === 'development') {
+      callback(null, true);
+      return;
+    }
+    
+    // In production, check against allowed list
+    if (origin && allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      // In production, check against allowed list
-      const allowed = ['http://localhost:5173', process.env.CLIENT_URL].filter(Boolean);
-      if (allowed.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
+      // Log for debugging
+      console.log('CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
@@ -30,6 +46,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   exposedHeaders: ['Authorization'],
   optionsSuccessStatus: 200,
+  preflightContinue: false,
 }));
 
 // Log CORS for debugging
@@ -63,6 +80,12 @@ app.use('/api/admin', adminRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
+    // Set CORS headers for 404 responses
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
+        res.header('Access-Control-Allow-Credentials', 'true');
+    }
     res.status(404).json({ message: 'Route not found' });
 });
 
@@ -73,9 +96,18 @@ app.use((err: Error, req: Request, res: Response, next: express.NextFunction) =>
     
     // Ensure CORS headers are set even on errors
     const origin = req.headers.origin;
-    if (origin) {
+    if (origin && allowedOrigins.includes(origin)) {
         res.header('Access-Control-Allow-Origin', origin);
         res.header('Access-Control-Allow-Credentials', 'true');
+    }
+    
+    // Handle CORS errors specifically
+    if (err.message === 'Not allowed by CORS') {
+        res.status(403).json({ 
+            message: 'CORS error: Origin not allowed',
+            error: process.env.NODE_ENV === 'development' ? err.message : undefined
+        });
+        return;
     }
     
     res.status(500).json({ 
